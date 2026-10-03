@@ -183,13 +183,16 @@ export const ProductosPage: React.FC = () => {
 
     setIsSubmitting(true);
     try {
-      const payload = {
-        nombre: formNombre.trim(),
-        sku: formSku.trim().toUpperCase(),
-        precio: parseFloat(formPrecio),
-        stock_disponible: parseInt(formStock, 10),
-        categoria_id: formCategoriaId ? formCategoriaId : null,
-      };
+      const newStock = parseInt(formStock, 10);
+        const payload = {
+          nombre: formNombre.trim(),
+          sku: formSku.trim().toUpperCase(),
+          precio: parseFloat(formPrecio),
+          stock_disponible: newStock,
+          categoria_id: formCategoriaId ? formCategoriaId : null,
+        };
+        const { data: { user } } = await supabase.auth.getUser();
+        const userEmail = user?.email || 'admin@inventario.com';
 
       if (editingProduct) {
         // UPDATE en tabla 'productos'
@@ -209,7 +212,27 @@ export const ProductosPage: React.FC = () => {
         setProductos((prev) =>
           prev.map((p) => (p.id === editingProduct.id ? updatedProd : p))
         );
+        console.log('--- PRODUCTO GUARDADO CON ÉXITO ---', data);
         showFeedback('success', `Producto "${updatedProd.nombre}" actualizado con éxito.`);
+        // Kardex: log stock adjustment if changed
+        if (newStock !== editingProduct.stock_disponible) {
+          const diff = newStock - editingProduct.stock_disponible;
+          const payloadMovimiento = {
+            producto_id: updatedProd.id,
+            tipo_movimiento: diff > 0 ? 'ENTRADA' : 'SALIDA',
+            cantidad: diff > 0 ? diff : Math.abs(diff),
+            motivo: diff > 0 ? 'Ajuste de Stock / Reposición' : 'Ajuste de Stock / Reducción',
+            usuario_email: userEmail,
+          };
+          console.log('--- INTENTANDO GUARDAR EN MOVIMIENTOS_INVENTARIO ---', { userEmail, payloadMovimiento });
+          const { data: movData, error: movError } = await supabase.from('movimientos_inventario').insert([payloadMovimiento]);
+          if (movError) {
+            console.error('--- ERROR EN MOVIMIENTOS_INVENTARIO ---', movError);
+            showFeedback('error', 'Producto guardado, pero falló el registro en Kardex: ' + movError.message);
+          } else {
+            console.log('--- MOVIMIENTO REGISTRADO CON ÉXITO EN KARDEX ---', movData);
+          }
+        }
       } else {
         // INSERT en tabla 'productos'
         const { data, error } = await supabase
@@ -225,7 +248,26 @@ export const ProductosPage: React.FC = () => {
 
         const createdProd = data as Producto;
         setProductos((prev) => [createdProd, ...prev]);
+        console.log('--- PRODUCTO GUARDADO CON ÉXITO ---', data);
         showFeedback('success', `Producto "${createdProd.nombre}" registrado con éxito.`);
+        // Kardex: initial stock entry if stock > 0
+        if (newStock > 0) {
+          const payloadMovimiento = {
+            producto_id: createdProd.id,
+            tipo_movimiento: 'ENTRADA',
+            cantidad: newStock,
+            motivo: 'Stock Inicial',
+            usuario_email: userEmail,
+          };
+          console.log('--- INTENTANDO GUARDAR EN MOVIMIENTOS_INVENTARIO ---', { userEmail, payloadMovimiento });
+          const { data: movData, error: movError } = await supabase.from('movimientos_inventario').insert([payloadMovimiento]);
+          if (movError) {
+            console.error('--- ERROR EN MOVIMIENTOS_INVENTARIO ---', movError);
+            showFeedback('error', 'Producto guardado, pero falló el registro en Kardex: ' + movError.message);
+          } else {
+            console.log('--- MOVIMIENTO REGISTRADO CON ÉXITO EN KARDEX ---', movData);
+          }
+        }
       }
 
       setIsFormModalOpen(false);
