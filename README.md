@@ -11,7 +11,7 @@ Una aplicación profesional para el control de inventarios y gestión de Kardex,
 ---
 
 ## 🚀 Demo en Vivo
-Puedes ver la aplicación en funcionamiento aquí: [Sustituir con tu enlace de Vercel](https://tu-proyecto.vercel.app)
+Puedes ver la aplicación en funcionamiento aquí: [[Sustituir con tu enlace de Vercel](https://tu-proyecto.vercel.app)](https://inventory-admin-engine.vercel.app/)
 
 ---
 
