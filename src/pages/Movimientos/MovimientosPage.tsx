@@ -19,9 +19,6 @@ import {
 import { supabase } from '../../lib/supabase';
 import type { Producto } from '../../types';
 
-// ---------------------------------------------------------------------------
-// Local types – aligned with actual Supabase column names
-// ---------------------------------------------------------------------------
 type TipoMovimiento = 'ENTRADA' | 'SALIDA' | 'AJUSTE';
 
 interface MovimientoRow {
@@ -32,14 +29,14 @@ interface MovimientoRow {
   motivo?: string | null;
   usuario_email?: string | null;
   created_at?: string;
-  // Joined relation
   productos?: { nombre: string; sku: string } | null;
 }
 
-// ---------------------------------------------------------------------------
-// Component
-// ---------------------------------------------------------------------------
-export const MovimientosPage: React.FC = () => {
+interface MovimientosPageProps {
+  searchTerm?: string;
+}
+
+export const MovimientosPage: React.FC<MovimientosPageProps> = ({ searchTerm: globalSearchTerm = '' }) => {
   // ---- Data state ----------------------------------------------------------
   const [movimientos, setMovimientos] = useState<MovimientoRow[]>([]);
   const [productosLista, setProductosLista] = useState<Producto[]>([]);
@@ -47,8 +44,11 @@ export const MovimientosPage: React.FC = () => {
   const [refreshing, setRefreshing] = useState<boolean>(false);
 
   // ---- Filter state --------------------------------------------------------
-  const [searchTerm, setSearchTerm] = useState<string>('');
+  const [localSearchTerm, setLocalSearchTerm] = useState<string>('');
   const [filterTipo, setFilterTipo] = useState<TipoMovimiento | 'TODOS'>('TODOS');
+
+  // Sincronizar búsqueda local o usar la global del Header
+  const activeSearchTerm = globalSearchTerm || localSearchTerm;
 
   // ---- Modal state ---------------------------------------------------------
   const [isModalOpen, setIsModalOpen] = useState<boolean>(false);
@@ -82,7 +82,7 @@ export const MovimientosPage: React.FC = () => {
     try {
       const { data, error } = await supabase
         .from('movimientos_inventario')
-        .select('*, productos(nombre, sku)')
+        .select('*, productos:producto_id(nombre, sku)')
         .order('created_at', { ascending: false });
 
       if (error) {
@@ -129,7 +129,7 @@ export const MovimientosPage: React.FC = () => {
         const [movRes, prodRes] = await Promise.all([
           supabase
             .from('movimientos_inventario')
-            .select('*, productos(nombre, sku)')
+            .select('*, productos:producto_id(nombre, sku)')
             .order('created_at', { ascending: false }),
           supabase
             .from('productos')
@@ -190,12 +190,12 @@ export const MovimientosPage: React.FC = () => {
     return movimientos.filter((m) => {
       const nombre = m.productos?.nombre?.toLowerCase() || '';
       const sku = m.productos?.sku?.toLowerCase() || '';
-      const term = searchTerm.toLowerCase();
+      const term = activeSearchTerm.toLowerCase();
       const matchSearch = nombre.includes(term) || sku.includes(term);
       const matchTipo = filterTipo === 'TODOS' || m.tipo_movimiento === filterTipo;
       return matchSearch && matchTipo;
     });
-  }, [movimientos, searchTerm, filterTipo]);
+  }, [movimientos, activeSearchTerm, filterTipo]);
 
   // =========================================================================
   // MODAL HELPERS
@@ -227,7 +227,7 @@ export const MovimientosPage: React.FC = () => {
   };
 
   // =========================================================================
-  // SUBMIT – register manual movement
+  // SUBMIT – Registrar movimiento manual y actualizar auditoría
   // =========================================================================
   const handleSubmitMovimiento = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -236,19 +236,16 @@ export const MovimientosPage: React.FC = () => {
 
     setIsSubmitting(true);
     try {
-      // a) Get active user email
       const {
         data: { user },
         error: userError,
       } = await supabase.auth.getUser();
       if (userError) throw new Error('No se pudo verificar el usuario activo: ' + userError.message);
       if (!user?.email) throw new Error('Debes iniciar sesión para registrar un movimiento.');
-      const userEmail = user.email;
 
       const cantidad = Number(formCantidad);
       const productoId = Number(formProductoId);
 
-      // b) Fetch current stock
       const { data: prodData, error: prodError } = await supabase
         .from('productos')
         .select('stock_disponible, nombre')
@@ -261,11 +258,11 @@ export const MovimientosPage: React.FC = () => {
 
       const stockActual = Number(prodData.stock_disponible);
       const nombreProducto: string = prodData.nombre;
+
       if (!Number.isSafeInteger(stockActual) || stockActual < 0) {
-        throw new Error('El producto tiene un stock actual inválido; no se puede registrar el movimiento.');
+        throw new Error('El producto tiene un stock actual inválido.');
       }
 
-      // c) Calculate new stock
       let nuevoStock: number;
       if (formTipo === 'ENTRADA') {
         nuevoStock = stockActual + cantidad;
@@ -273,50 +270,50 @@ export const MovimientosPage: React.FC = () => {
         nuevoStock = stockActual - cantidad;
         if (nuevoStock < 0) {
           setModalError(
-            `Stock insuficiente. El producto "${nombreProducto}" solo tiene ${stockActual} unidades disponibles.`,
+            `Stock insuficiente. El producto "${nombreProducto}" solo tiene ${stockActual} unidades disponibles.`
           );
           return;
         }
       } else {
-        // AJUSTE → set directly to the given quantity
         nuevoStock = cantidad;
       }
-      if (!Number.isSafeInteger(nuevoStock) || nuevoStock < 0) {
-        throw new Error('El movimiento produciría un stock inválido.');
-      }
 
-      // d) Update stock in productos
-      const { error: updateError } = await supabase
-        .from('productos')
-        .update({ stock_disponible: nuevoStock })
-        .eq('id', productoId);
-
-      if (updateError) {
-        console.error('[Supabase Error] Update stock:', updateError);
-        throw new Error('Error al actualizar el stock del producto: ' + updateError.message);
-      }
-
-      // e) Insert movement record
       const payloadMov = {
         producto_id: productoId,
         tipo_movimiento: formTipo,
         cantidad,
         motivo: formMotivo.trim(),
-        usuario_email: userEmail,
+        usuario_email: user.email,
       };
 
-      const { error: movError } = await supabase
+      const { data: movData, error: movError } = await supabase
         .from('movimientos_inventario')
-        .insert([payloadMov]);
+        .insert([payloadMov])
+        .select('id')
+        .single();
 
-      if (movError) {
+      if (movError || !movData) {
         console.error('[Supabase Error] Insert movimiento:', movError);
-        throw new Error('Stock actualizado, pero falló el registro del movimiento: ' + movError.message);
+        throw new Error('Error al registrar el movimiento en el historial: ' + (movError?.message || ''));
+      }
+
+      const { error: updateError } = await supabase
+        .from('productos')
+        .update({
+          stock_disponible: nuevoStock,
+          id_ultimo_mov_inv: movData.id,
+          modificado_por: user.id,
+          modificado_el: new Date().toISOString(),
+        })
+        .eq('id', productoId);
+
+      if (updateError) {
+        console.error('[Supabase Error] Update stock y auditoria:', updateError);
+        throw new Error('Movimiento registrado, pero falló la actualización de auditoría en producto: ' + updateError.message);
       }
 
       showFeedback('success', `Movimiento de ${formTipo} registrado para "${nombreProducto}".`);
 
-      // f) Reload
       await Promise.all([fetchMovimientos(true), fetchProductos()]);
 
       setIsModalOpen(false);
@@ -330,9 +327,6 @@ export const MovimientosPage: React.FC = () => {
     }
   };
 
-  // =========================================================================
-  // BADGE HELPER
-  // =========================================================================
   const tipoBadge = (tipo: TipoMovimiento) => {
     const map: Record<TipoMovimiento, { bg: string; text: string; icon: React.ReactNode }> = {
       ENTRADA: {
@@ -360,12 +354,9 @@ export const MovimientosPage: React.FC = () => {
     );
   };
 
-  // =========================================================================
-  // RENDER
-  // =========================================================================
   return (
     <div className="space-y-6">
-      {/* ── Toast Notification ─────────────────────────────────────────── */}
+      {/* Toast Notification */}
       {feedback && (
         <div
           className={`p-4 rounded-xl border flex items-center justify-between shadow-xs transition-all animate-in fade-in slide-in-from-top-2 ${
@@ -391,7 +382,7 @@ export const MovimientosPage: React.FC = () => {
         </div>
       )}
 
-      {/* ── Page Header ────────────────────────────────────────────────── */}
+      {/* Page Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h2 className="text-2xl font-bold text-slate-800 tracking-tight flex items-center gap-2.5">
@@ -415,9 +406,8 @@ export const MovimientosPage: React.FC = () => {
         </div>
       </div>
 
-      {/* ── Metrics Bar ────────────────────────────────────────────────── */}
+      {/* Metrics Bar */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        {/* Total Movimientos */}
         <div className="bg-white p-4 rounded-xl border border-slate-200/80 shadow-xs flex items-center justify-between">
           <div>
             <div className="text-xs font-semibold text-slate-500 uppercase tracking-wider">
@@ -430,7 +420,6 @@ export const MovimientosPage: React.FC = () => {
           </div>
         </div>
 
-        {/* Total Entradas */}
         <div className="bg-white p-4 rounded-xl border border-slate-200/80 shadow-xs flex items-center justify-between">
           <div>
             <div className="text-xs font-semibold text-slate-500 uppercase tracking-wider">
@@ -443,7 +432,6 @@ export const MovimientosPage: React.FC = () => {
           </div>
         </div>
 
-        {/* Total Salidas */}
         <div className="bg-white p-4 rounded-xl border border-slate-200/80 shadow-xs flex items-center justify-between">
           <div>
             <div className="text-xs font-semibold text-slate-500 uppercase tracking-wider">
@@ -457,22 +445,20 @@ export const MovimientosPage: React.FC = () => {
         </div>
       </div>
 
-      {/* ── Filter & Search Bar ────────────────────────────────────────── */}
+      {/* Filter & Search Bar */}
       <div className="bg-white p-4 rounded-xl border border-slate-200/80 shadow-xs flex flex-col md:flex-row gap-3 items-center justify-between">
         <div className="flex flex-col sm:flex-row gap-3 w-full md:w-auto flex-1">
-          {/* Search Input */}
           <div className="relative w-full sm:w-72">
             <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
             <input
               type="text"
               placeholder="Buscar por Nombre o SKU..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
+              value={activeSearchTerm}
+              onChange={(e) => setLocalSearchTerm(e.target.value)}
               className="w-full pl-9 pr-4 py-2 text-sm bg-slate-50 border border-slate-200 rounded-lg text-slate-800 placeholder-slate-400 focus:outline-hidden focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all"
             />
           </div>
 
-          {/* Type Dropdown */}
           <div className="w-full sm:w-52">
             <select
               value={filterTipo}
@@ -488,7 +474,6 @@ export const MovimientosPage: React.FC = () => {
         </div>
 
         <div className="flex items-center gap-2 w-full md:w-auto justify-end">
-          {/* Refresh */}
           <button
             type="button"
             onClick={() => void Promise.all([fetchMovimientos(true), fetchProductos()])}
@@ -501,7 +486,7 @@ export const MovimientosPage: React.FC = () => {
         </div>
       </div>
 
-      {/* ── Movements Table ────────────────────────────────────────────── */}
+      {/* Movements Table */}
       <div className="bg-white rounded-xl border border-slate-200/80 shadow-xs overflow-hidden">
         {loading ? (
           <div className="py-20 flex flex-col items-center justify-center text-slate-400 gap-3">
@@ -513,15 +498,15 @@ export const MovimientosPage: React.FC = () => {
             <Boxes className="w-12 h-12 mx-auto text-slate-300 mb-3" />
             <h3 className="text-base font-semibold text-slate-700">No se encontraron movimientos</h3>
             <p className="text-xs text-slate-400 max-w-sm mx-auto mt-1">
-              {searchTerm || filterTipo !== 'TODOS'
+              {activeSearchTerm || filterTipo !== 'TODOS'
                 ? 'Prueba ajustando los filtros de búsqueda o tipo.'
                 : 'Las entradas, salidas y ajustes del inventario aparecerán aquí.'}
             </p>
-            {(searchTerm || filterTipo !== 'TODOS') && (
+            {(activeSearchTerm || filterTipo !== 'TODOS') && (
               <button
                 type="button"
                 onClick={() => {
-                  setSearchTerm('');
+                  setLocalSearchTerm('');
                   setFilterTipo('TODOS');
                 }}
                 className="mt-4 px-3.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-xs font-semibold transition-colors cursor-pointer"
@@ -550,15 +535,10 @@ export const MovimientosPage: React.FC = () => {
 
                   return (
                     <tr key={mov.id} className="hover:bg-slate-50/80 transition-colors group">
-                      {/* Fecha */}
                       <td className="px-6 py-4 text-xs font-mono text-slate-500 whitespace-nowrap">
                         {mov.created_at ? new Date(mov.created_at).toLocaleString() : '—'}
                       </td>
-
-                      {/* Tipo Badge */}
                       <td className="px-6 py-4">{tipoBadge(mov.tipo_movimiento)}</td>
-
-                      {/* Producto */}
                       <td className="px-6 py-4">
                         <div className="font-semibold text-slate-900">
                           {mov.productos?.nombre || `Producto #${mov.producto_id}`}
@@ -569,8 +549,6 @@ export const MovimientosPage: React.FC = () => {
                           </span>
                         )}
                       </td>
-
-                      {/* Cantidad */}
                       <td className="px-6 py-4 text-center whitespace-nowrap">
                         <span
                           className={`font-bold text-sm ${
@@ -584,13 +562,9 @@ export const MovimientosPage: React.FC = () => {
                           {isEntrada ? `+${mov.cantidad}` : isSalida ? `-${mov.cantidad}` : mov.cantidad}
                         </span>
                       </td>
-
-                      {/* Motivo */}
                       <td className="px-6 py-4 text-slate-600 text-xs max-w-[220px] truncate">
                         {mov.motivo || '—'}
                       </td>
-
-                      {/* Usuario */}
                       <td className="px-6 py-4 text-xs text-slate-500 whitespace-nowrap">
                         {mov.usuario_email || '—'}
                       </td>
@@ -603,11 +577,10 @@ export const MovimientosPage: React.FC = () => {
         )}
       </div>
 
-      {/* ── Modal: Nuevo Movimiento ────────────────────────────────────── */}
+      {/* Modal: Nuevo Movimiento */}
       {isModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs animate-in fade-in duration-150">
           <div className="w-full max-w-lg bg-white rounded-2xl shadow-2xl border border-slate-100 overflow-hidden flex flex-col max-h-[90vh]">
-            {/* Header */}
             <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 bg-slate-50/70">
               <div className="flex items-center gap-2.5">
                 <div className="w-9 h-9 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center">
@@ -627,7 +600,6 @@ export const MovimientosPage: React.FC = () => {
               </button>
             </div>
 
-            {/* Form */}
             <form onSubmit={handleSubmitMovimiento} className="p-6 space-y-4 overflow-y-auto flex-1">
               {modalError && (
                 <div className="p-3.5 bg-rose-50 border border-rose-200 rounded-xl flex items-start gap-2.5 text-xs text-rose-700 animate-in fade-in">
@@ -636,7 +608,6 @@ export const MovimientosPage: React.FC = () => {
                 </div>
               )}
 
-              {/* Producto */}
               <div>
                 <label htmlFor="mov-producto" className="block text-xs font-semibold text-slate-700 mb-1">
                   Producto <span className="text-rose-500">*</span>
@@ -666,7 +637,6 @@ export const MovimientosPage: React.FC = () => {
                 )}
               </div>
 
-              {/* Tipo de Movimiento */}
               <div>
                 <label htmlFor="mov-tipo" className="block text-xs font-semibold text-slate-700 mb-1">
                   Tipo de Movimiento <span className="text-rose-500">*</span>
@@ -683,7 +653,6 @@ export const MovimientosPage: React.FC = () => {
                 </select>
               </div>
 
-              {/* Cantidad */}
               <div>
                 <label htmlFor="mov-cantidad" className="block text-xs font-semibold text-slate-700 mb-1">
                   {formTipo === 'AJUSTE' ? 'Stock final' : 'Cantidad'}{' '}
@@ -711,7 +680,6 @@ export const MovimientosPage: React.FC = () => {
                 )}
               </div>
 
-              {/* Motivo */}
               <div>
                 <label htmlFor="mov-motivo" className="block text-xs font-semibold text-slate-700 mb-1">
                   Motivo / Detalle <span className="text-rose-500">*</span>
@@ -736,7 +704,6 @@ export const MovimientosPage: React.FC = () => {
                 )}
               </div>
 
-              {/* Actions */}
               <div className="flex items-center justify-end gap-3 pt-2 border-t border-slate-100">
                 <button
                   type="button"

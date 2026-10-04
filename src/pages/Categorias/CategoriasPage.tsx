@@ -1,10 +1,14 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { Plus, Tags, Layers, Loader2, RefreshCw } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import type { Categoria } from '../../types';
 import { CategoriasModal } from '../../components/CategoriasModal';
 
-export const CategoriasPage: React.FC = () => {
+interface CategoriasPageProps {
+  searchTerm?: string;
+}
+
+export const CategoriasPage: React.FC<CategoriasPageProps> = ({ searchTerm = '' }) => {
   const [categorias, setCategorias] = useState<Categoria[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [isModalOpen, setIsModalOpen] = useState<boolean>(false);
@@ -50,10 +54,19 @@ export const CategoriasPage: React.FC = () => {
     };
   }, []);
 
-
   const handleCategoriaCreated = (newCat: Categoria) => {
     setCategorias((prev) => [...prev, newCat].sort((a, b) => a.nombre.localeCompare(b.nombre)));
   };
+
+  // Filtrado de categorías según el término enviado desde el Navbar / Header
+  const filteredCategorias = useMemo(() => {
+    return categorias.filter((cat) => {
+      const term = searchTerm.toLowerCase();
+      const matchNombre = cat.nombre.toLowerCase().includes(term);
+      const matchDesc = cat.descripcion?.toLowerCase().includes(term) || false;
+      return matchNombre || matchDesc;
+    });
+  }, [categorias, searchTerm]);
 
   return (
     <div className="space-y-6">
@@ -95,25 +108,29 @@ export const CategoriasPage: React.FC = () => {
           <Loader2 className="w-8 h-8 animate-spin text-indigo-600" />
           <p className="text-sm font-medium text-slate-600">Cargando categorías de Supabase...</p>
         </div>
-      ) : categorias.length === 0 ? (
+      ) : filteredCategorias.length === 0 ? (
         <div className="bg-white rounded-2xl border border-dashed border-slate-200 p-12 text-center">
           <Tags className="w-12 h-12 mx-auto text-slate-300 mb-3" />
-          <h3 className="text-base font-semibold text-slate-700">No hay categorías registradas</h3>
+          <h3 className="text-base font-semibold text-slate-700">No se encontraron categorías</h3>
           <p className="text-xs text-slate-400 max-w-sm mx-auto mt-1 mb-4">
-            Crea tu primera categoría para organizar los productos del catálogo.
+            {searchTerm
+              ? 'Prueba ajustando el término de búsqueda introducido en el buscador superior.'
+              : 'Crea tu primera categoría para organizar los productos del catálogo.'}
           </p>
-          <button
-            type="button"
-            onClick={() => setIsModalOpen(true)}
-            className="inline-flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-xl text-xs font-semibold hover:bg-indigo-700 transition-colors shadow-xs cursor-pointer"
-          >
-            <Plus className="w-4 h-4" />
-            <span>Crear primera categoría</span>
-          </button>
+          {!searchTerm && (
+            <button
+              type="button"
+              onClick={() => setIsModalOpen(true)}
+              className="inline-flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-xl text-xs font-semibold hover:bg-indigo-700 transition-colors shadow-xs cursor-pointer"
+            >
+              <Plus className="w-4 h-4" />
+              <span>Crear primera categoría</span>
+            </button>
+          )}
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
-          {categorias.map((cat) => (
+          {filteredCategorias.map((cat) => (
             <div
               key={cat.id}
               className="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-xs hover:border-indigo-200 hover:shadow-md transition-all group flex flex-col justify-between"

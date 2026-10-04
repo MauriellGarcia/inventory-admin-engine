@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import type { Session } from '@supabase/supabase-js';
-import { supabase } from './lib/supabase';
+import { supabase } from "./lib/supabase";
 import { Layout, type NavigationTab } from './components';
 import {
   Login,
@@ -15,6 +15,9 @@ export function App() {
   const [session, setSession] = useState<Session | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
   const [currentTab, setCurrentTab] = useState<NavigationTab>('dashboard');
+  
+  // Estado global para la barra de búsqueda del Header
+  const [searchTerm, setSearchTerm] = useState<string>('');
 
   useEffect(() => {
     // 1. Obtener la sesión inicial activa
@@ -40,6 +43,12 @@ export function App() {
     await supabase.auth.signOut();
   };
 
+  // Limpiar el buscador al cambiar de pestaña
+  const handleSelectTab = (tab: NavigationTab) => {
+    setCurrentTab(tab);
+    setSearchTerm('');
+  };
+
   // Pantalla de carga mientras se verifica la sesión en Supabase
   if (loading) {
     return (
@@ -55,17 +64,17 @@ export function App() {
     return <Login />;
   }
 
-  // Renderizado modular de las vistas principales
+  // Renderizado modular pasando el término de búsqueda a todas las vistas
   const renderContent = () => {
     switch (currentTab) {
       case 'dashboard':
         return <DashboardPage />;
       case 'productos':
-        return <ProductosPage />;
+        return <ProductosPage searchTerm={searchTerm} />;
       case 'categorias':
-        return <CategoriasPage />;
+        return <CategoriasPage searchTerm={searchTerm} />;
       case 'movimientos':
-        return <MovimientosPage />;
+        return <MovimientosPage searchTerm={searchTerm} />;
       default:
         return <DashboardPage />;
     }
@@ -74,10 +83,12 @@ export function App() {
   return (
     <Layout
       currentTab={currentTab}
-      onSelectTab={setCurrentTab}
+      onSelectTab={handleSelectTab}
       userEmail={session.user.email || 'usuario@erp.com'}
       onSignOut={handleSignOut}
       title="ERP Inventario - Admin"
+      searchTerm={searchTerm}
+      onSearchChange={setSearchTerm}
     >
       {renderContent()}
     </Layout>

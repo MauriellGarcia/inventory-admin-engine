@@ -8,6 +8,8 @@ interface LayoutProps {
   onSelectTab: (tab: NavigationTab) => void;
   title?: string;
   userEmail?: string;
+  searchTerm?: string;
+  onSearchChange?: (value: string) => void;
   onSignOut?: () => void;
 }
 
@@ -17,6 +19,8 @@ export const Layout: React.FC<LayoutProps> = ({
   onSelectTab,
   title = 'ERP Inventario - Admin',
   userEmail,
+  searchTerm = '',
+  onSearchChange,
   onSignOut,
 }) => {
   return (
@@ -33,6 +37,8 @@ export const Layout: React.FC<LayoutProps> = ({
         <Navbar
           title={title}
           userEmail={userEmail}
+          searchTerm={searchTerm}
+          onSearchChange={onSearchChange}
           onSignOut={onSignOut}
         />
         <main className="flex-1 p-6 md:p-8 max-w-7xl w-full mx-auto">

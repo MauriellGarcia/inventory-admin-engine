@@ -15,20 +15,27 @@ import {
   SlidersHorizontal,
   FolderPlus,
 } from 'lucide-react';
-import { supabase } from '../lib/supabase';
+import { supabase } from "../lib/supabase";
 import type { Producto, Categoria } from '../types';
-import { CategoriasModal } from '../components/CategoriasModal';
+import { CategoriasModal } from "../components/CategoriasModal";
 
-export const ProductosPage: React.FC = () => {
+interface ProductosPageProps {
+  searchTerm?: string;
+}
+
+export const ProductosPage: React.FC<ProductosPageProps> = ({ searchTerm: globalSearchTerm = '' }) => {
   const [productos, setProductos] = useState<Producto[]>([]);
   const [categorias, setCategorias] = useState<Categoria[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [refreshing, setRefreshing] = useState<boolean>(false);
 
-  // Filters state
-  const [searchTerm, setSearchTerm] = useState<string>('');
+  // Filters state (búsqueda local dentro de la propia página)
+  const [localSearchTerm, setLocalSearchTerm] = useState<string>('');
   const [selectedCategoria, setSelectedCategoria] = useState<string>('ALL');
   const [onlyLowStock, setOnlyLowStock] = useState<boolean>(false);
+
+  // Búsqueda activa: Prioriza el término tipeado en el Header global
+  const activeSearchTerm = globalSearchTerm || localSearchTerm;
 
   // Modals state
   const [isCategoriasModalOpen, setIsCategoriasModalOpen] = useState<boolean>(false);
@@ -184,15 +191,15 @@ export const ProductosPage: React.FC = () => {
     setIsSubmitting(true);
     try {
       const newStock = parseInt(formStock, 10);
-        const payload = {
-          nombre: formNombre.trim(),
-          sku: formSku.trim().toUpperCase(),
-          precio: parseFloat(formPrecio),
-          stock_disponible: newStock,
-          categoria_id: formCategoriaId ? formCategoriaId : null,
-        };
-        const { data: { user } } = await supabase.auth.getUser();
-        const userEmail = user?.email || 'admin@inventario.com';
+      const payload = {
+        nombre: formNombre.trim(),
+        sku: formSku.trim().toUpperCase(),
+        precio: parseFloat(formPrecio),
+        stock_disponible: newStock,
+        categoria_id: formCategoriaId ? formCategoriaId : null,
+      };
+      const { data: { user } } = await supabase.auth.getUser();
+      const userEmail = user?.email || 'admin@inventario.com';
 
       if (editingProduct) {
         // UPDATE en tabla 'productos'
@@ -212,8 +219,8 @@ export const ProductosPage: React.FC = () => {
         setProductos((prev) =>
           prev.map((p) => (p.id === editingProduct.id ? updatedProd : p))
         );
-        console.log('--- PRODUCTO GUARDADO CON ÉXITO ---', data);
         showFeedback('success', `Producto "${updatedProd.nombre}" actualizado con éxito.`);
+
         // Kardex: log stock adjustment if changed
         if (newStock !== editingProduct.stock_disponible) {
           const diff = newStock - editingProduct.stock_disponible;
@@ -224,13 +231,10 @@ export const ProductosPage: React.FC = () => {
             motivo: diff > 0 ? 'Ajuste de Stock / Reposición' : 'Ajuste de Stock / Reducción',
             usuario_email: userEmail,
           };
-          console.log('--- INTENTANDO GUARDAR EN MOVIMIENTOS_INVENTARIO ---', { userEmail, payloadMovimiento });
-          const { data: movData, error: movError } = await supabase.from('movimientos_inventario').insert([payloadMovimiento]);
+          const { error: movError } = await supabase.from('movimientos_inventario').insert([payloadMovimiento]);
           if (movError) {
             console.error('--- ERROR EN MOVIMIENTOS_INVENTARIO ---', movError);
             showFeedback('error', 'Producto guardado, pero falló el registro en Kardex: ' + movError.message);
-          } else {
-            console.log('--- MOVIMIENTO REGISTRADO CON ÉXITO EN KARDEX ---', movData);
           }
         }
       } else {
@@ -248,8 +252,8 @@ export const ProductosPage: React.FC = () => {
 
         const createdProd = data as Producto;
         setProductos((prev) => [createdProd, ...prev]);
-        console.log('--- PRODUCTO GUARDADO CON ÉXITO ---', data);
         showFeedback('success', `Producto "${createdProd.nombre}" registrado con éxito.`);
+
         // Kardex: initial stock entry if stock > 0
         if (newStock > 0) {
           const payloadMovimiento = {
@@ -259,13 +263,10 @@ export const ProductosPage: React.FC = () => {
             motivo: 'Stock Inicial',
             usuario_email: userEmail,
           };
-          console.log('--- INTENTANDO GUARDAR EN MOVIMIENTOS_INVENTARIO ---', { userEmail, payloadMovimiento });
-          const { data: movData, error: movError } = await supabase.from('movimientos_inventario').insert([payloadMovimiento]);
+          const { error: movError } = await supabase.from('movimientos_inventario').insert([payloadMovimiento]);
           if (movError) {
             console.error('--- ERROR EN MOVIMIENTOS_INVENTARIO ---', movError);
             showFeedback('error', 'Producto guardado, pero falló el registro en Kardex: ' + movError.message);
-          } else {
-            console.log('--- MOVIMIENTO REGISTRADO CON ÉXITO EN KARDEX ---', movData);
           }
         }
       }
@@ -317,14 +318,14 @@ export const ProductosPage: React.FC = () => {
     }
   };
 
-
-
-  // Filtered Products
+  // Filtered Products: evalúa activeSearchTerm (Header o Local)
   const filteredProducts = useMemo(() => {
     return productos.filter((p) => {
+      const term = activeSearchTerm.toLowerCase().trim();
       const matchSearch =
-        p.nombre.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        p.sku.toLowerCase().includes(searchTerm.toLowerCase());
+        !term ||
+        p.nombre.toLowerCase().includes(term) ||
+        p.sku.toLowerCase().includes(term);
 
       const matchCategoria =
         selectedCategoria === 'ALL' ||
@@ -336,7 +337,7 @@ export const ProductosPage: React.FC = () => {
 
       return matchSearch && matchCategoria && matchLowStock;
     });
-  }, [productos, searchTerm, selectedCategoria, onlyLowStock]);
+  }, [productos, activeSearchTerm, selectedCategoria, onlyLowStock]);
 
   const totalStockItems = useMemo(
     () => productos.reduce((acc, p) => acc + (p.stock_disponible || 0), 0),
@@ -457,8 +458,8 @@ export const ProductosPage: React.FC = () => {
             <input
               type="text"
               placeholder="Buscar por Nombre o SKU..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
+              value={activeSearchTerm}
+              onChange={(e) => setLocalSearchTerm(e.target.value)}
               className="w-full pl-9 pr-4 py-2 text-sm bg-slate-50 border border-slate-200 rounded-lg text-slate-800 placeholder-slate-400 focus:outline-hidden focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all"
             />
           </div>
@@ -526,15 +527,15 @@ export const ProductosPage: React.FC = () => {
             <Package className="w-12 h-12 mx-auto text-slate-300 mb-3" />
             <h3 className="text-base font-semibold text-slate-700">No se encontraron productos</h3>
             <p className="text-xs text-slate-400 max-w-sm mx-auto mt-1">
-              {searchTerm || selectedCategoria !== 'ALL' || onlyLowStock
+              {activeSearchTerm || selectedCategoria !== 'ALL' || onlyLowStock
                 ? 'Prueba ajustando los filtros de búsqueda o categoría.'
                 : 'Empieza agregando tu primer producto con el botón superior.'}
             </p>
-            {(searchTerm || selectedCategoria !== 'ALL' || onlyLowStock) && (
+            {(activeSearchTerm || selectedCategoria !== 'ALL' || onlyLowStock) && (
               <button
                 type="button"
                 onClick={() => {
-                  setSearchTerm('');
+                  setLocalSearchTerm('');
                   setSelectedCategoria('ALL');
                   setOnlyLowStock(false);
                 }}
@@ -655,7 +656,6 @@ export const ProductosPage: React.FC = () => {
       {isFormModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs animate-in fade-in duration-150">
           <div className="w-full max-w-lg bg-white rounded-2xl shadow-2xl border border-slate-100 overflow-hidden flex flex-col max-h-[90vh]">
-            {/* Header */}
             <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 bg-slate-50/70">
               <div className="flex items-center gap-2.5">
                 <div className="w-9 h-9 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center">
@@ -681,7 +681,6 @@ export const ProductosPage: React.FC = () => {
               </button>
             </div>
 
-            {/* Form */}
             <form onSubmit={handleSubmitProduct} className="p-6 space-y-4 overflow-y-auto flex-1">
               {modalError && (
                 <div className="p-3.5 bg-rose-50 border border-rose-200 rounded-xl flex items-start gap-2.5 text-xs text-rose-700 animate-in fade-in">
@@ -689,8 +688,6 @@ export const ProductosPage: React.FC = () => {
                   <div className="flex-1 font-medium">{modalError}</div>
                 </div>
               )}
-
-              {/* Nombre */}
 
               <div>
                 <label htmlFor="prod-nombre" className="block text-xs font-semibold text-slate-700 mb-1">
@@ -716,7 +713,6 @@ export const ProductosPage: React.FC = () => {
                 )}
               </div>
 
-              {/* SKU */}
               <div>
                 <label htmlFor="prod-sku" className="block text-xs font-semibold text-slate-700 mb-1">
                   Código SKU <span className="text-rose-500">*</span>
@@ -741,7 +737,6 @@ export const ProductosPage: React.FC = () => {
                 )}
               </div>
 
-              {/* Grid: Precio y Stock */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <label htmlFor="prod-precio" className="block text-xs font-semibold text-slate-700 mb-1">
@@ -796,7 +791,6 @@ export const ProductosPage: React.FC = () => {
                 </div>
               </div>
 
-              {/* Categoría Selector with Quick Create Button */}
               <div>
                 <div className="flex items-center justify-between mb-1">
                   <label htmlFor="prod-cat" className="block text-xs font-semibold text-slate-700">
@@ -826,7 +820,6 @@ export const ProductosPage: React.FC = () => {
                 </select>
               </div>
 
-              {/* Actions Footer */}
               <div className="pt-4 border-t border-slate-100 flex items-center justify-end gap-3">
                 <button
                   type="button"

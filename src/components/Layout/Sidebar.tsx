@@ -4,7 +4,6 @@ import {
   Package,
   Tags,
   ArrowLeftRight,
-  Settings,
   Database as DbIcon,
   LogOut,
 } from 'lucide-react';
@@ -61,17 +60,6 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentTab, onSelectTab, onSig
             </button>
           );
         })}
-
-        <div className="pt-6 px-3 pb-2 text-[10px] font-semibold tracking-wider text-slate-400 uppercase">
-          Sistema
-        </div>
-        <button
-          type="button"
-          className="w-full flex items-center gap-3 px-3.5 py-2.5 rounded-lg text-sm font-medium text-slate-400 hover:bg-slate-800 hover:text-white transition-all cursor-pointer"
-        >
-          <Settings className="w-4 h-4" />
-          <span>Configuración</span>
-        </button>
       </div>
 
       {/* Footer / User Session */}
