@@ -4,6 +4,8 @@ export interface Categoria {
   id: string;
   nombre: string;
   descripcion?: string;
+  prefijo?: string;
+  ultimo_consecutivo?: number;
   created_at?: string;
 }
 
@@ -28,6 +30,17 @@ export interface MovimientoInventario {
   referencia?: string | null;
   usuario_id?: string | null;
   created_at?: string;
+}
+
+export interface MovimientoRow {
+  id: number;
+  producto_id: number;
+  tipo_movimiento: TipoMovimiento;
+  cantidad: number;
+  motivo?: string | null;
+  usuario_email?: string | null;
+  created_at?: string;
+  productos?: { nombre: string; sku: string } | null;
 }
 
 export type Json =

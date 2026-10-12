@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { Plus, Tags, Layers, Loader2, RefreshCw } from 'lucide-react';
-import { supabase } from '../../lib/supabase';
+import { getCategorias } from '../../features/categories/services/categoryService';
 import type { Categoria } from '../../types';
 import { CategoriasModal } from '../../components/CategoriasModal';
 
@@ -16,11 +16,7 @@ export const CategoriasPage: React.FC<CategoriasPageProps> = ({ searchTerm = '' 
   const fetchCategorias = useCallback(async () => {
     setLoading(true);
     try {
-      const { data, error } = await supabase
-        .from('categorias')
-        .select('*')
-        .order('nombre', { ascending: true });
-
+      const { data, error } = await getCategorias();
       if (error) throw error;
       setCategorias(data || []);
     } catch (err: unknown) {
@@ -33,26 +29,13 @@ export const CategoriasPage: React.FC<CategoriasPageProps> = ({ searchTerm = '' 
   useEffect(() => {
     let isMounted = true;
     void (async () => {
-      try {
-        const { data, error } = await supabase
-          .from('categorias')
-          .select('*')
-          .order('nombre', { ascending: true });
-
-        if (!isMounted) return;
-        if (error) throw error;
-        setCategorias(data || []);
-      } catch (err: unknown) {
-        console.error('Error al cargar categorías:', err);
-      } finally {
-        if (isMounted) setLoading(false);
-      }
+      if (!isMounted) return;
+      await fetchCategorias();
     })();
-
     return () => {
       isMounted = false;
     };
-  }, []);
+  }, [fetchCategorias]);
 
   const handleCategoriaCreated = (newCat: Categoria) => {
     setCategorias((prev) => [...prev, newCat].sort((a, b) => a.nombre.localeCompare(b.nombre)));

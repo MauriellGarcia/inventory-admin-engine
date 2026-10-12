@@ -17,6 +17,7 @@ import {
   Package,
 } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
+import { getMovimientos, getProductosList, registrarMovimientoManual } from '../../features/inventory/services/inventoryService';
 import type { Producto } from '../../types';
 
 type TipoMovimiento = 'ENTRADA' | 'SALIDA' | 'AJUSTE';
@@ -80,19 +81,15 @@ export const MovimientosPage: React.FC<MovimientosPageProps> = ({ searchTerm: gl
     else setRefreshing(true);
 
     try {
-      const { data, error } = await supabase
-        .from('movimientos_inventario')
-        .select('*, productos:producto_id(nombre, sku)')
-        .order('created_at', { ascending: false });
-
+      const { data, error } = await getMovimientos();
       if (error) {
-        console.error('[Supabase Error] Movimientos:', error);
-        showFeedback('error', 'Error al cargar movimientos: ' + error.message);
+        console.error('[Service Error] Movimientos:', error);
+        showFeedback('error', 'Error al cargar movimientos: ' + (error.message || error));
       } else {
-        setMovimientos((data as MovimientoRow[]) || []);
+        setMovimientos(data || []);
       }
     } catch (err: unknown) {
-      console.error('[Supabase Error] Movimientos:', err);
+      console.error('[Service Error] Movimientos:', err);
       const message = err instanceof Error ? err.message : 'Error desconocido al cargar movimientos.';
       showFeedback('error', message);
     } finally {
@@ -103,19 +100,15 @@ export const MovimientosPage: React.FC<MovimientosPageProps> = ({ searchTerm: gl
 
   const fetchProductos = useCallback(async () => {
     try {
-      const { data, error } = await supabase
-        .from('productos')
-        .select('id, nombre, sku, stock_disponible')
-        .order('nombre', { ascending: true });
-
+      const { data, error } = await getProductosList();
       if (error) {
-        console.error('[Supabase Error] Productos:', error);
-        showFeedback('error', 'Error al cargar productos: ' + error.message);
+        console.error('[Service Error] Productos:', error);
+        showFeedback('error', 'Error al cargar productos: ' + (error.message || error));
       } else {
-        setProductosLista((data as Producto[]) || []);
+        setProductosLista(data || []);
       }
     } catch (err: unknown) {
-      console.error('[Supabase Error] Productos:', err);
+      console.error('[Service Error] Productos:', err);
       const message = err instanceof Error ? err.message : 'Error desconocido al cargar productos.';
       showFeedback('error', message);
     }
@@ -126,28 +119,8 @@ export const MovimientosPage: React.FC<MovimientosPageProps> = ({ searchTerm: gl
     let isMounted = true;
     void (async () => {
       try {
-        const [movRes, prodRes] = await Promise.all([
-          supabase
-            .from('movimientos_inventario')
-            .select('*, productos:producto_id(nombre, sku)')
-            .order('created_at', { ascending: false }),
-          supabase
-            .from('productos')
-            .select('id, nombre, sku, stock_disponible')
-            .order('nombre', { ascending: true }),
-        ]);
-
+        await Promise.all([fetchMovimientos(true), fetchProductos()]);
         if (!isMounted) return;
-        if (movRes.data) setMovimientos(movRes.data as MovimientoRow[]);
-        if (prodRes.data) setProductosLista(prodRes.data as Producto[]);
-        if (movRes.error) {
-          console.error('[Supabase Error] Movimientos:', movRes.error);
-          showFeedback('error', 'Error al cargar movimientos: ' + movRes.error.message);
-        }
-        if (prodRes.error) {
-          console.error('[Supabase Error] Productos:', prodRes.error);
-          showFeedback('error', 'Error al cargar productos: ' + prodRes.error.message);
-        }
       } catch (err: unknown) {
         console.error('[Supabase Error] Init:', err);
         const message = err instanceof Error ? err.message : 'Error desconocido al cargar el Kardex.';
@@ -245,74 +218,28 @@ export const MovimientosPage: React.FC<MovimientosPageProps> = ({ searchTerm: gl
 
       const cantidad = Number(formCantidad);
       const productoId = Number(formProductoId);
+      const tipo = formTipo as 'ENTRADA' | 'SALIDA' | 'AJUSTE';
+      const motivo = formMotivo.trim();
 
-      const { data: prodData, error: prodError } = await supabase
-        .from('productos')
-        .select('stock_disponible, nombre')
-        .eq('id', productoId)
-        .single();
-
-      if (prodError || !prodData) {
-        throw new Error('No se pudo obtener el stock actual del producto.');
-      }
-
-      const stockActual = Number(prodData.stock_disponible);
-      const nombreProducto: string = prodData.nombre;
-
-      if (!Number.isSafeInteger(stockActual) || stockActual < 0) {
-        throw new Error('El producto tiene un stock actual inválido.');
-      }
-
-      let nuevoStock: number;
-      if (formTipo === 'ENTRADA') {
-        nuevoStock = stockActual + cantidad;
-      } else if (formTipo === 'SALIDA') {
-        nuevoStock = stockActual - cantidad;
-        if (nuevoStock < 0) {
-          setModalError(
-            `Stock insuficiente. El producto "${nombreProducto}" solo tiene ${stockActual} unidades disponibles.`
-          );
-          return;
-        }
-      } else {
-        nuevoStock = cantidad;
-      }
-
-      const payloadMov = {
-        producto_id: productoId,
-        tipo_movimiento: formTipo,
+      const { error } = await registrarMovimientoManual({
+        productoId,
+        tipo,
         cantidad,
-        motivo: formMotivo.trim(),
-        usuario_email: user.email,
-      };
+        motivo,
+        userEmail: user.email,
+        userId: user.id,
+      });
 
-      const { data: movData, error: movError } = await supabase
-        .from('movimientos_inventario')
-        .insert([payloadMov])
-        .select('id')
-        .single();
-
-      if (movError || !movData) {
-        console.error('[Supabase Error] Insert movimiento:', movError);
-        throw new Error('Error al registrar el movimiento en el historial: ' + (movError?.message || ''));
+      if (error) {
+        throw new Error('Error al registrar el movimiento: ' + (error.message || error));
       }
 
-      const { error: updateError } = await supabase
-        .from('productos')
-        .update({
-          stock_disponible: nuevoStock,
-          id_ultimo_mov_inv: movData.id,
-          modificado_por: user.id,
-          modificado_el: new Date().toISOString(),
-        })
-        .eq('id', productoId);
+      // Obtener nombre del producto para feedback
+      const nombreProducto = productosLista.find(p => p.id === productoId)?.nombre || 'producto';
+      showFeedback('success', `Movimiento de ${tipo} registrado para "${nombreProducto}".`);
 
-      if (updateError) {
-        console.error('[Supabase Error] Update stock y auditoria:', updateError);
-        throw new Error('Movimiento registrado, pero falló la actualización de auditoría en producto: ' + updateError.message);
-      }
+      // Stock update and audit are now handled inside registrarMovimientoManual service.
 
-      showFeedback('success', `Movimiento de ${formTipo} registrado para "${nombreProducto}".`);
 
       await Promise.all([fetchMovimientos(true), fetchProductos()]);
 

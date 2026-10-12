@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { X, Plus, Tags, Loader2, AlertCircle, CheckCircle2, RefreshCw } from 'lucide-react';
-import { supabase } from '../lib/supabase';
+import { getCategorias, createCategoria } from "../features/categories/services/categoryService";
 import type { Categoria } from '../types';
 
 interface CategoriasModalProps {
@@ -21,21 +21,26 @@ export const CategoriasModal: React.FC<CategoriasModalProps> = ({
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
   // Form state
+
   const [nombre, setNombre] = useState('');
   const [descripcion, setDescripcion] = useState('');
+  const [prefijo, setPrefijo] = useState('');
+  // Calculate prefijo from nombre (first 4 uppercase letters, no spaces/accents)
+  useEffect(() => {
+    const clean = nombre
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '') // remove diacritics
+      .replace(/\s+/g, '')
+      .toUpperCase();
+    setPrefijo(clean.slice(0, 4));
+  }, [nombre]);
 
   const fetchCategorias = useCallback(async () => {
     setLoading(true);
     setErrorMessage(null);
     try {
-      const { data, error } = await supabase
-        .from('categorias')
-        .select('*')
-        .order('nombre', { ascending: true });
-
-      if (error) {
-        throw error;
-      }
+      const { data, error } = await getCategorias();
+      if (error) throw error;
       setCategorias(data || []);
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : 'Error al cargar las categorías';
@@ -49,26 +54,15 @@ export const CategoriasModal: React.FC<CategoriasModalProps> = ({
     let isMounted = true;
     if (isOpen) {
       void (async () => {
-        try {
-          const { data, error } = await supabase
-            .from('categorias')
-            .select('*')
-            .order('nombre', { ascending: true });
-
-          if (!isMounted) return;
-          if (error) throw error;
-          setCategorias(data || []);
-        } catch (err: unknown) {
-          if (!isMounted) return;
-          const message = err instanceof Error ? err.message : 'Error al cargar las categorías';
-          setErrorMessage(message);
+        if (isMounted) {
+          await fetchCategorias();
         }
       })();
     }
     return () => {
       isMounted = false;
     };
-  }, [isOpen]);
+  }, [isOpen, fetchCategorias]);
 
 
 
@@ -94,16 +88,11 @@ export const CategoriasModal: React.FC<CategoriasModalProps> = ({
     setSuccessMessage(null);
 
     try {
-      const { data, error } = await supabase
-        .from('categorias')
-        .insert([
-          {
-            nombre: nombre.trim(),
-            descripcion: descripcion.trim() || undefined,
-          },
-        ])
-        .select()
-        .single();
+      const { data, error } = await createCategoria({
+        nombre: nombre.trim(),
+        descripcion: descripcion.trim() || undefined,
+        prefijo: prefijo || undefined,
+      });
 
 
       if (error) {
@@ -114,7 +103,8 @@ export const CategoriasModal: React.FC<CategoriasModalProps> = ({
       setSuccessMessage(`Categoría "${createdCat.nombre}" creada con éxito.`);
       setNombre('');
       setDescripcion('');
-      
+      setPrefijo('');
+
       // Actualizar la lista local y notificar al componente padre
       setCategorias((prev) => [...prev, createdCat].sort((a, b) => a.nombre.localeCompare(b.nombre)));
       if (onCategoriaCreated) {
@@ -193,6 +183,15 @@ export const CategoriasModal: React.FC<CategoriasModalProps> = ({
                   className="w-full px-3 py-2 text-sm bg-white border border-slate-200 rounded-lg text-slate-800 placeholder-slate-400 focus:outline-hidden focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all"
                   required
                 />
+                {/* Prefijo preview */}
+                {prefijo ? (
+                  <div className="mt-1.5 flex items-center gap-1.5 text-xs text-slate-500 font-medium">
+                    <span>Prefijo:</span>
+                    <span className="inline-flex items-center px-2 py-0.5 bg-indigo-50 text-indigo-700 font-mono font-bold text-xs rounded-md border border-indigo-200/60 uppercase tracking-wider">
+                      {prefijo}
+                    </span>
+                  </div>
+                ) : null}
               </div>
 
               <div>
