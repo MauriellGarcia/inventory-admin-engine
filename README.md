@@ -1,4 +1,4 @@
-# 📦 Sistema de Inventario y Kardex
+# 📦 Sistema de Inventario y Kardex (ERP Engine)
 
 ![React](https://img.shields.io/badge/React-20232A?style=for-the-badge&logo=react&logoColor=61DAFB)
 ![TypeScript](https://img.shields.io/badge/TypeScript-007ACC?style=for-the-badge&logo=typescript&logoColor=white)
@@ -6,48 +6,98 @@
 ![Supabase](https://img.shields.io/badge/Supabase-3ECF8E?style=for-the-badge&logo=supabase&logoColor=white)
 ![Vercel](https://img.shields.io/badge/Vercel-000000?style=for-the-badge&logo=vercel&logoColor=white)
 
-Una aplicación profesional para el control de inventarios y gestión de Kardex, diseñada para ofrecer trazabilidad total de movimientos de productos en tiempo real.
+Una aplicación profesional de nivel empresarial para el control de inventarios, gestión de Kardex y catálogo de productos, diseñada bajo **Arquitectura Basada en Dominios (`src/features/`)**, desacoplamiento de servicios de datos y persistencia atómica en PostgreSQL.
 
 ---
 
 ## 🚀 Demo en Vivo
-Puedes ver la aplicación en funcionamiento aquí: [[Sustituir con tu enlace de Vercel](https://tu-proyecto.vercel.app)](https://inventory-admin-engine.vercel.app/)
+Puedes ver la aplicación en funcionamiento aquí: [inventory-admin-engine.vercel.app](https://inventory-admin-engine.vercel.app/)
 
 ---
 
 ## ✨ Características Principales
 
-- **📦 CRUD Completo de Productos:** Gestión detallada de catálogo con SKU, descripción, precios y stock mínimo.
-- **📁 Categorías:** Clasificación organizada de productos para una mejor navegación y filtrado.
-- **📉 Kardex en Tiempo Real:** Historial detallado de todas las entradas y salidas, permitiendo una trazabilidad exacta por producto.
-- **🔧 Ajustes Manuales:** Funcionalidad para corregir inventarios mediante ajustes de entrada o salida con justificación.
-- **🔐 Auth & RLS:** Autenticación robusta mediante Supabase Auth y seguridad a nivel de fila (Row Level Security) para proteger los datos.
-- **📱 Interfaz Responsive:** Diseño moderno y adaptativo utilizando Tailwind CSS.
+- **📦 CRUD Completo de Productos & SKU Automático:** Gestión de catálogo con asignación de SKU consecutivo autogenerado en tiempo real según la categoría seleccionada (ej. `JUGU-0001`).
+- **📁 Categorías & Previsualización de Prefijo:** Clasificación organizada con cálculo de prefijos taxonómicos únicos (primeras 4 letras) en tiempo de creación.
+- **📉 Kardex en Tiempo Real:** Historial detallado de Entradas, Salidas y Ajustes con trazabilidad exacta y auditoría por usuario.
+- **🔧 Ajustes Manuales de Stock:** Funcionalidad para corregir inventarios con justificación y actualización atómica del catálogo.
+- **🔐 Auth & RLS:** Autenticación mediante Supabase Auth y seguridad a nivel de fila (Row Level Security) para proteger la información.
+- **🔍 Búsqueda Global & Filtros Sincronizados:** Filtrado dinámico por texto (nombre/SKU) y categoría compartido entre el Navbar y las vistas operativas.
+- **📱 Interfaz Responsive:** Diseño moderno y adaptativo utilizando Tailwind CSS con modales accesibles.
 
 ---
 
 ## 🛠️ Stack Técnico y Arquitectura
 
-- **Frontend:** React 18 con Vite para un desarrollo ultra rápido.
-- **Lenguaje:** TypeScript para un código tipado y seguro.
-- **Estilos:** Tailwind CSS con componentes de UI modernos.
-- **Backend-as-a-Service:** Supabase (Base de datos PostgreSQL, Auth, y Realtime).
-- **Gestión de Estado:** Hooks de React y Context API (o librerías de estado según implementación).
+- **Frontend:** React 18 con Vite para un empaquetado y desarrollo de alta velocidad.
+- **Arquitectura de Software:** Modular orientada a características/dominios (`src/features/`) con capas de servicios desacopladas (`categoryService`, `inventoryService`, `productService`).
+- **Lenguaje:** TypeScript 5 para un tipado estricto e interfaces seguras.
+- **Estilos:** Tailwind CSS con componentes y modales UI personalizados.
+- **Backend-as-a-Service:** Supabase (Base de datos PostgreSQL, Auth, PL/pgSQL RPCs).
 - **Iconografía:** Lucide React.
 
 ---
 
-## 📊 Esquema de Base de Datos
+## 📐 Estructura del Proyecto
 
-El sistema se basa en un esquema relacional optimizado en PostgreSQL:
+```text
+src/
+├── features/               # Dominios de negocio aislados
+│   ├── auth/              # Control de inicio de sesión y sesión activa
+│   ├── categories/        # Gestión de categorías, prefijos y modales
+│   ├── dashboard/         # Indicadores KPI y métricas generales
+│   ├── inventory/         # Kardex de movimientos y auditoría de stock
+│   └── products/          # Catálogo maestro y asignación automática de SKU
+├── components/            # UI global compartida (Layout, Navbar, Sidebar, Modal)
+├── lib/                   # Cliente y configuración global de Supabase
+└── types/                 # Definiciones e interfaces TypeScript
+```
+
+---
+
+## 📊 Esquema de Base de Datos y Funciones Atómicas
+
+El sistema se basa en un esquema relacional optimizado en PostgreSQL con lógica transaccional en servidor:
 
 ### Tablas Principales:
-- **`categorias`**: Almacena las categorías de los productos.
-  - `id`, `nombre`, `descripcion`, `created_at`.
+- **`categorias`**: Almacena las familias de productos y el control de consecutivos.
+  - `id` (uuid), `nombre`, `descripcion`, `prefijo` (text, unique), `ultimo_consecutivo` (integer), `created_at`.
 - **`productos`**: Catálogo maestro de artículos.
-  - `id`, `nombre`, `sku`, `precio_compra`, `precio_venta`, `stock_actual`, `stock_minimo`, `categoria_id`.
+  - `id` (bigint/serial), `nombre`, `sku` (text, unique), `precio`, `stock_disponible`, `categoria_id` (uuid), `id_ultimo_mov_inv`, `modificado_por`, `modificado_el`.
 - **`movimientos_inventario`**: Registro histórico (Kardex).
-  - `id`, `producto_id`, `tipo` (Entrada/Salida/Ajuste), `cantidad`, `motivo`, `fecha`.
+  - `id` (bigint/serial), `producto_id`, `tipo_movimiento` (`ENTRADA` | `SALIDA` | `AJUSTE`), `cantidad`, `motivo`, `usuario_email`, `created_at`.
+
+### ⚙️ Lógica de Ingeniería: Autogeneración Consecutiva de SKU (RPC)
+Para prevenir condiciones de carrera (*race conditions*) y asegurar la unicidad de los SKUs al crear productos en entornos concurrentes, la generación se ejecuta en una función PL/pgSQL atómica:
+
+```sql
+CREATE OR REPLACE FUNCTION public.generar_siguiente_sku(p_categoria_id uuid)
+RETURNS text
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $function$
+DECLARE
+  v_prefijo text;
+  v_siguiente_num integer;
+  v_sku text;
+BEGIN
+  -- Incrementar el consecutivo de la categoría de manera atómica
+  UPDATE public.categorias
+  SET ultimo_consecutivo = ultimo_consecutivo + 1
+  WHERE id = p_categoria_id
+  RETURNING prefijo, ultimo_consecutivo INTO v_prefijo, v_siguiente_num;
+
+  IF v_prefijo IS NULL THEN
+    RAISE EXCEPTION 'La categoría seleccionada no existe o no tiene un prefijo configurado.';
+  END IF;
+
+  -- Formatear SKU con padding numérico a 4 dígitos (Ej. COSM-0001)
+  v_sku := concat(v_prefijo, '-', lpad(v_siguiente_num::text, 4, '0'));
+
+  RETURN v_sku;
+END;
+$function$;
+```
 
 ---
 
@@ -57,8 +107,8 @@ Sigue estos pasos para ejecutar el proyecto en tu entorno local:
 
 1. **Clonar el repositorio:**
    ```bash
-   git clone https://github.com/tu-usuario/tu-repositorio.git
-   cd tu-repositorio
+   git clone https://github.com/MauriellGarcia/inventory-admin-engine.git
+   cd inventory-admin-engine
    ```
 
 2. **Instalar dependencias:**
@@ -84,4 +134,4 @@ Sigue estos pasos para ejecutar el proyecto en tu entorno local:
 Este proyecto está bajo la Licencia MIT.
 
 ---
-Desarrollado con ❤️ por [Tu Nombre/Equipo]
+Desarrollado por [Mauriell García (Mau)](https://github.com/MauriellGarcia)
